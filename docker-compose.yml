@@ -1,4 +1,5 @@
-name: blogdoft-sbus-emulator-viewer
+name: developer_toolbox
+
 services:
   emulator:
     container_name: "emulator"
@@ -20,6 +21,9 @@ services:
       sb-emulator:
         aliases:
           - "sb-emulator"
+      back_net:
+    cpus: "1"
+    mem_limit: "516MB"
 
   sqledge:
     container_name: "sqledge"
@@ -32,10 +36,29 @@ services:
       ACCEPT_EULA: ${ACCEPT_EULA}
       MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD}" # To be filled by user as per policy : https://learn.microsoft.com/en-us/sql/relational-databases/security/strong-passwords?view=sql-server-linux-ver16 
 
+  postgres:
+    container_name: postgres
+    image: postgres:14-alpine
+    volumes:
+      - ./postgres/data:/var/lib/postgresql/data
+    env_file:
+      - ./postgres/.env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER"]
+      interval: 5s
+      timeout: 5s
+      retries: 5    
+    networks:
+      - back_net
+    cpus: 1
+    mem_limit: "256MB"
+
   backend:
     container_name: backend
-    image: ghcr.io/blogdoft/sbus-emulator-viewer/blogdoft-sbus-api:latest
+    image: ghcr.io/blogdoft/developer-toolbox/developer-toolbox-api:latest
     env_file:
+      - .env
       - backend.env
     volumes:
       - "${CONFIG_PATH}:${SbusEmulatorConfigPath}"
@@ -43,36 +66,47 @@ services:
       sb-emulator:
         aliases:
           - "sqledge"
+      back_net:
     depends_on:
-      - emulator
+      emulator:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    cpus: "1"
+    mem_limit: "256MB"      
 
   frontend:
-    image: ghcr.io/blogdoft/sbus-emulator-viewer/blogdoft-sbus-client:latest
+    image: ghcr.io/blogdoft/developer-toolbox/developer-toolbox-client:latest
     networks:
-      sb-emulator:
-        aliases:
-          - "sqledge"
+      - front_net
+      - back_net
     depends_on:
       - backend
-    ports:
-      - "4300:4300"
+    cpus: "1"
+    mem_limit: "128MB"         
 
   reverse-proxy:
     build:
       context: .
       dockerfile: ./nginx.dockerfile
     container_name: reverse-proxy
-    mem_limit: 128m
-    cpus: 0.5
     networks:
       sb-emulator:
         aliases:
           - "sqledge"
+      back_net:
+      front_net:
     depends_on:
       - backend
       - frontend
     ports:
       - "8080:8080"
+    mem_limit: 128m
+    cpus: 0.5
 
 networks:
   sb-emulator:
+  back_net:
+    driver: bridge
+  front_net:
+    driver: bridge
